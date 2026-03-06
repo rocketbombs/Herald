@@ -1,7 +1,3 @@
-// /api/feeds.js — Vercel Edge Function
-// Supports ?batch=1 (fast feeds) and ?batch=2 (slow feeds)
-// Extracts thumbnail images from media:content, media:thumbnail, enclosure, and inline img tags
-
 export const config = { runtime: "edge" };
 
 const BATCH_1 = [
@@ -24,184 +20,91 @@ const BATCH_2 = [
   { id: "citynews", name: "CityNews Toronto", icon: "📺", color: "#0D47A1", url: "https://toronto.citynews.ca/feed/", category: "Ontario" },
 ];
 
-// ── XML parsing ─────────────────────────────────────────────────────────────
-
 function extractTag(block, tag) {
-  const cdataRe = new RegExp(`<${tag}[^>]*>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*</${tag}>`, "i");
-  const m1 = block.match(cdataRe);
+  const c = new RegExp(`<${tag}[^>]*>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*</${tag}>`, "i");
+  const m1 = block.match(c);
   if (m1) return m1[1].trim();
-  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
-  const m2 = block.match(re);
+  const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
+  const m2 = block.match(r);
   return m2 ? m2[1].trim() : "";
 }
 
-function extractImage(block) {
-  // 1. media:thumbnail url="..."
-  const mediaThumbnail = block.match(/<media:thumbnail[^>]*url=["']([^"']+)["']/i);
-  if (mediaThumbnail) return mediaThumbnail[1];
-
-  // 2. media:content url="..." (only images)
-  const mediaContent = block.match(/<media:content[^>]*url=["']([^"']+\.(?:jpg|jpeg|png|webp|gif)[^"']*)["']/i);
-  if (mediaContent) return mediaContent[1];
-
-  // 3. media:content with medium="image"
-  const mediaImg = block.match(/<media:content[^>]*medium=["']image["'][^>]*url=["']([^"']+)["']/i);
-  if (mediaImg) return mediaImg[1];
-  const mediaImg2 = block.match(/<media:content[^>]*url=["']([^"']+)["'][^>]*medium=["']image["']/i);
-  if (mediaImg2) return mediaImg2[1];
-
-  // 4. enclosure with image type
-  const enclosure = block.match(/<enclosure[^>]*url=["']([^"']+)["'][^>]*type=["']image/i);
-  if (enclosure) return enclosure[1];
-  const enclosure2 = block.match(/<enclosure[^>]*type=["']image[^"']*["'][^>]*url=["']([^"']+)["']/i);
-  if (enclosure2) return enclosure2[1];
-
-  // 5. First <img src="..."> in description/content
-  const imgTag = block.match(/<img[^>]*src=["']([^"']+\.(?:jpg|jpeg|png|webp|gif)[^"']*)["']/i);
-  if (imgTag) return imgTag[1];
-
+function extractImage(b) {
+  const t = b.match(/<media:thumbnail[^>]*url=["']([^"']+)["']/i);
+  if (t) return t[1];
+  const mc = b.match(/<media:content[^>]*url=["']([^"']+\.(?:jpg|jpeg|png|webp|gif)[^"']*)["']/i);
+  if (mc) return mc[1];
+  const mi = b.match(/<media:content[^>]*medium=["']image["'][^>]*url=["']([^"']+)["']/i);
+  if (mi) return mi[1];
+  const mi2 = b.match(/<media:content[^>]*url=["']([^"']+)["'][^>]*medium=["']image["']/i);
+  if (mi2) return mi2[1];
+  const enc = b.match(/<enclosure[^>]*url=["']([^"']+)["'][^>]*type=["']image/i);
+  if (enc) return enc[1];
+  const enc2 = b.match(/<enclosure[^>]*type=["']image[^"']*["'][^>]*url=["']([^"']+)["']/i);
+  if (enc2) return enc2[1];
+  const img = b.match(/<img[^>]*src=["']([^"']+\.(?:jpg|jpeg|png|webp|gif)[^"']*)["']/i);
+  if (img) return img[1];
   return "";
 }
 
 function parseItems(xml) {
   const items = [];
-
-  // RSS <item>
-  const itemRe = /<item[\s>]([\s\S]*?)<\/item>/gi;
   let m;
-  while ((m = itemRe.exec(xml)) !== null) {
-    items.push({
-      title: extractTag(m[1], "title"),
-      description: extractTag(m[1], "description") || extractTag(m[1], "content:encoded"),
-      link: extractTag(m[1], "link"),
-      pubDate: extractTag(m[1], "pubDate") || extractTag(m[1], "dc:date"),
-      image: extractImage(m[1]),
-    });
+  const ir = /<item[\s>]([\s\S]*?)<\/item>/gi;
+  while ((m = ir.exec(xml)) !== null) {
+    items.push({ title: extractTag(m[1], "title"), description: extractTag(m[1], "description") || extractTag(m[1], "content:encoded"), link: extractTag(m[1], "link"), pubDate: extractTag(m[1], "pubDate") || extractTag(m[1], "dc:date"), image: extractImage(m[1]) });
   }
-
-  // Atom <entry>
   if (items.length === 0) {
-    const entryRe = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
-    while ((m = entryRe.exec(xml)) !== null) {
-      const linkMatch = m[1].match(/<link[^>]*href=["']([^"']+)["']/);
-      items.push({
-        title: extractTag(m[1], "title"),
-        description: extractTag(m[1], "summary") || extractTag(m[1], "content"),
-        link: linkMatch ? linkMatch[1] : extractTag(m[1], "link"),
-        pubDate: extractTag(m[1], "published") || extractTag(m[1], "updated"),
-        image: extractImage(m[1]),
-      });
+    const er = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
+    while ((m = er.exec(xml)) !== null) {
+      const lm = m[1].match(/<link[^>]*href=["']([^"']+)["']/);
+      items.push({ title: extractTag(m[1], "title"), description: extractTag(m[1], "summary") || extractTag(m[1], "content"), link: lm ? lm[1] : extractTag(m[1], "link"), pubDate: extractTag(m[1], "published") || extractTag(m[1], "updated"), image: extractImage(m[1]) });
     }
   }
-
   return items.slice(0, 12);
 }
 
-function stripHtml(html) {
-  if (!html) return "";
-  return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
+function strip(h) {
+  if (!h) return "";
+  return h.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
 }
 
-// ── Fetch one feed ──────────────────────────────────────────────────────────
-
-async function fetchFeed(feed, timeoutMs) {
+async function fetchFeed(feed, ms) {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(feed.url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "HamiltonHerald/1.0 (RSS Aggregator)",
-        "Accept": "application/rss+xml, application/atom+xml, text/xml, */*",
-      },
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const text = await res.text();
-    if (!text || text.length < 100) return null;
-
-    const items = parseItems(text);
-    if (items.length === 0) return null;
-
-    const articles = items.map((item) => ({
-      title: stripHtml(item.title),
-      summary: stripHtml(item.description).slice(0, 300),
-      link: item.link,
-      pubDate: item.pubDate || "",
-      image: item.image || "",
-      feedId: feed.id,
-      category: feed.category,
-    })).filter((a) => a.title && a.title.length > 5);
-
-    if (articles.length === 0) return null;
-    return {
-      feed: { id: feed.id, name: feed.name, icon: feed.icon, color: feed.color, category: feed.category, count: articles.length },
-      articles,
-    };
-  } catch {
-    return null;
-  }
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), ms);
+    const r = await fetch(feed.url, { signal: c.signal, headers: { "Accept": "application/rss+xml, application/atom+xml, text/xml, */*" } });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const txt = await r.text();
+    if (!txt || txt.length < 100) return null;
+    const items = parseItems(txt);
+    if (!items.length) return null;
+    const arts = items.map(i => ({ title: strip(i.title), summary: strip(i.description).slice(0, 300), link: i.link, pubDate: i.pubDate || "", image: i.image || "", feedId: feed.id, category: feed.category })).filter(a => a.title && a.title.length > 5);
+    if (!arts.length) return null;
+    return { feed: { id: feed.id, name: feed.name, icon: feed.icon, color: feed.color, category: feed.category, count: arts.length }, articles: arts };
+  } catch { return null; }
 }
 
-// ── Dedup ───────────────────────────────────────────────────────────────────
-
-function dedup(articles) {
-  const seen = new Set();
-  return articles.filter((a) => {
-    const k = a.title.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+function dedup(a) {
+  const s = new Set();
+  return a.filter(x => { const k = x.title.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50); if (s.has(k)) return false; s.add(k); return true; });
 }
-
-// ── Handler ─────────────────────────────────────────────────────────────────
 
 export default async function handler(req) {
   const url = new URL(req.url);
   const batch = url.searchParams.get("batch") || "1";
-
   const feeds = batch === "2" ? BATCH_2 : BATCH_1;
-  const PER_FEED_TIMEOUT = batch === "2" ? 4000 : 3000;
-  const GLOBAL_DEADLINE = batch === "2" ? 8000 : 6000;
-
+  const perFeed = batch === "2" ? 4000 : 3000;
+  const deadline = batch === "2" ? 8000 : 6000;
   const results = [];
-  const racers = feeds.map(async (f) => {
-    const r = await fetchFeed(f, PER_FEED_TIMEOUT);
-    if (r) results.push(r);
-  });
-
-  await Promise.race([
-    Promise.allSettled(racers),
-    new Promise((resolve) => setTimeout(resolve, GLOBAL_DEADLINE)),
-  ]);
-
-  const allArticles = [];
-  const liveFeeds = [];
-  for (const r of results) {
-    liveFeeds.push(r.feed);
-    allArticles.push(...r.articles);
-  }
-
-  const sorted = dedup(allArticles).sort((a, b) =>
-    new Date(b.pubDate || 0).getTime() - new Date(a.pubDate || 0).getTime()
-  );
-
-  return new Response(JSON.stringify({
-    articles: sorted,
-    feeds: liveFeeds,
-    batch: parseInt(batch),
-    fetchedAt: new Date().toISOString(),
-  }), {
+  const racers = feeds.map(async f => { const r = await fetchFeed(f, perFeed); if (r) results.push(r); });
+  await Promise.race([Promise.allSettled(racers), new Promise(r => setTimeout(r, deadline))]);
+  const allArts = [], lf = [];
+  for (const r of results) { lf.push(r.feed); allArts.push(...r.articles); }
+  const sorted = dedup(allArts).sort((a, b) => new Date(b.pubDate || 0) - new Date(a.pubDate || 0));
+  return new Response(JSON.stringify({ articles: sorted, feeds: lf, batch: parseInt(batch), fetchedAt: new Date().toISOString() }), {
     status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
-      "CDN-Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
-      "Vercel-CDN-Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
-    },
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600", "CDN-Cache-Control": "public, s-maxage=300, stale-while-revalidate=600", "Vercel-CDN-Cache-Control": "public, s-maxage=300, stale-while-revalidate=600" },
   });
 }
