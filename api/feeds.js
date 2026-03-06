@@ -88,7 +88,7 @@ async function fetchFeed(feed, ms) {
 
 function dedup(a) {
   const s = new Set();
-  return a.filter(x => { const k = x.title.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50); if (s.has(k)) return false; s.add(k); return true; });
+  return a.filter(x => { const k = `${x.feedId}-${x.title.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50)}`; if (s.has(k)) return false; s.add(k); return true; });
 }
 
 export default async function handler(req) {

@@ -11,7 +11,7 @@ const FEED_META = {
 };
 
 function timeAgo(d){if(!d)return"";try{const m=Math.floor((Date.now()-new Date(d).getTime())/6e4);if(isNaN(m)||m<0)return"";if(m<1)return"now";if(m<60)return`${m}m`;const h=Math.floor(m/60);if(h<24)return`${h}h`;const dy=Math.floor(h/24);if(dy<7)return`${dy}d`;return new Date(d).toLocaleDateString("en-CA",{month:"short",day:"numeric"})}catch{return""}}
-function dedup(a){const s=new Set();return a.filter(x=>{const k=(x.title||"").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,50);if(!k||s.has(k))return false;s.add(k);return true})}
+function dedup(a){const s=new Set();return a.filter(x=>{const k=`${x.feedId}-${(x.title||"").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,50)}`;if(!k||s.has(k))return false;s.add(k);return true})}
 
 // ── Weather ─────────────────────────────────────────────────────────────────
 const WMO={0:"☀️ Clear",1:"🌤 Clear",2:"⛅ Cloudy",3:"☁️ Overcast",45:"🌫 Fog",51:"🌦 Drizzle",61:"🌧 Rain",63:"🌧 Rain",65:"🌧 Heavy Rain",66:"🌧 Freezing Rain",71:"🌨 Snow",73:"🌨 Snow",75:"❄️ Heavy Snow",80:"🌦 Showers",82:"⛈ Storms",95:"⛈ Thunder"};
@@ -46,12 +46,14 @@ function Weather(){
 // ── Card ────────────────────────────────────────────────────────────────────
 function Card({a,big,i}){
   const meta=FEED_META[a.feedId]||{name:a.feedId,color:"#78909C"};
-  const[imgOk,setImgOk]=useState(!!a.image);
+  const[imgOk,setImgOk]=useState(true);
+  const hasImg=a.image&&imgOk;
   return(
     <a href={a.link}target="_blank"rel="noopener noreferrer"
       className={`hm-card${big?" hm-card--feat":""}`}
-      style={{"--accent":meta.color,animationDelay:`${i*.03}s`}}>
-      {big&&a.image&&imgOk?(
+      style={{"--accent":meta.color,animationDelay:`${i*.03}s`}}
+      aria-label={`${a.title} — ${meta.name}`}>
+      {big?(
         <div className="hm-card-hero">
           <div className="hm-card-hero-text">
             <div className="hm-card-meta">
@@ -61,7 +63,10 @@ function Card({a,big,i}){
             <h3 className="hm-card-title">{a.title}</h3>
             {a.summary&&<p className="hm-card-sum">{a.summary.slice(0,180)}{a.summary.length>180?"…":""}</p>}
           </div>
-          <img src={a.image}alt=""className="hm-card-hero-img"onError={()=>setImgOk(false)}loading="lazy"/>
+          {a.image?(
+            hasImg?<img src={a.image}alt={a.title}className="hm-card-hero-img"onError={()=>setImgOk(false)}loading="lazy"/>
+            :<div className="hm-card-hero-img hm-card-img-fallback"><span className="hm-card-img-fallback-text">{meta.name}</span></div>
+          ):null}
         </div>
       ):(
         <>
@@ -69,18 +74,19 @@ function Card({a,big,i}){
             <span className="hm-card-src">{meta.name}</span>
             {a.time&&<span className="hm-card-time">{a.time}</span>}
           </div>
-          {!big&&a.image&&imgOk?(
+          {a.image?(
             <div className="hm-card-thumb-row">
               <div className="hm-card-thumb-text">
                 <h3 className="hm-card-title">{a.title}</h3>
                 {a.summary&&<p className="hm-card-sum">{a.summary.slice(0,90)}{a.summary.length>90?"…":""}</p>}
               </div>
-              <img src={a.image}alt=""className="hm-card-thumb"onError={()=>setImgOk(false)}loading="lazy"/>
+              {hasImg?<img src={a.image}alt={a.title}className="hm-card-thumb"onError={()=>setImgOk(false)}loading="lazy"/>
+              :<div className="hm-card-thumb hm-card-img-fallback"/>}
             </div>
           ):(
             <>
               <h3 className="hm-card-title">{a.title}</h3>
-              {a.summary&&<p className="hm-card-sum">{a.summary.slice(0,big?200:110)}{a.summary.length>(big?200:110)?"…":""}</p>}
+              {a.summary&&<p className="hm-card-sum">{a.summary.slice(0,110)}{a.summary.length>110?"…":""}</p>}
             </>
           )}
         </>
@@ -148,7 +154,24 @@ export default function TheHammer(){
   useEffect(()=>{load()},[load]);
   useEffect(()=>{const iv=setInterval(load,5*60*1000);return()=>clearInterval(iv)},[load]);
 
-  const cats=["all",...Array.from(new Set(feeds.map(f=>f.category)))];
+  // Fix 3: Live-updating relative timestamp
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+  const updatedAgo = updated ? (() => {
+    const m = Math.floor((now - updated.getTime()) / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ${m % 60}m ago`;
+  })() : null;
+
+  const cats=["all",...Array.from(new Set(articles.map(a=>a.category).filter(Boolean)))];
+  // Fix 4: Only show categories that have articles in the current loaded set
+  const catsWithCounts = cats.map(c => ({ cat: c, count: c === "all" ? articles.length : articles.filter(a => a.category === c).length })).filter(x => x.count > 0);
+
+  // Reset filter if current category was removed
+  useEffect(() => {
+    if (filter !== "all" && !catsWithCounts.find(x => x.cat === filter)) setFilter("all");
+  }, [catsWithCounts, filter]);
   const fil=filter==="all"?articles:articles.filter(a=>a.category===filter);
   const feat=fil.slice(0,3),rest=fil.slice(3);
   const ticker=articles.slice(0,25);
@@ -187,13 +210,14 @@ export default function TheHammer(){
         .hm-header-status{display:flex;align-items:center;gap:5px}
 
         /* ── Ticker ── */
-        .hm-ticker{overflow:hidden;white-space:nowrap;background:var(--bg2);border-bottom:1px solid var(--border2);padding:6px 0}
+        .hm-ticker{overflow:hidden;white-space:nowrap;background:var(--bg2);border-bottom:1px solid var(--border2);padding:6px 0;display:none}
         .hm-ticker-inner{display:inline-block;animation:hm-ticker 100s linear infinite}
+        .hm-ticker:hover .hm-ticker-inner{animation-play-state:paused}
         .hm-ticker-dot{color:var(--accent);margin:0 8px;font-size:8px}
         .hm-ticker-text{color:var(--tx2);margin-right:28px;font-size:11px;font-family:var(--body)}
 
         /* ── Nav ── */
-        .hm-nav{background:var(--bg);border-bottom:1px solid var(--border2);position:sticky;top:0;z-index:100}
+        .hm-nav{background:rgba(10,10,15,.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border2);position:sticky;top:0;z-index:100}
         .hm-nav-inner{max-width:var(--max);margin:0 auto;padding:0 var(--px);display:flex;align-items:center;gap:4px}
         .hm-tabs{display:flex;gap:2px;flex:1;padding:5px 0;overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
         .hm-tabs::-webkit-scrollbar{height:2px}
@@ -244,6 +268,16 @@ export default function TheHammer(){
         .hm-card-thumb-text{flex:1;min-width:0}
         .hm-card-thumb{width:72px;height:54px;object-fit:cover;border-radius:6px;flex-shrink:0;background:var(--bg4)}
 
+        /* Fix 1: Stable image fallback — keeps hero dimensions, shows gradient */
+        .hm-card-img-fallback{background:linear-gradient(135deg,var(--bg3),var(--bg4));display:flex;align-items:center;justify-content:center;overflow:hidden}
+        .hm-card-img-fallback-text{font-size:10px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:1px;font-family:var(--head);opacity:.6}
+
+        /* Fix 5: Focus-visible for keyboard navigation */
+        .hm-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px;transform:translateY(-1px)}
+        .hm-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px}
+        .hm-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+        .hm-empty-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
         /* ── Wave 2 bar ── */
         .hm-wave2{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:200% 100%;animation:hm-shimmer 1.8s ease infinite;padding:8px 16px;border-radius:8px;text-align:center;font-size:11px;color:var(--tx3);margin-bottom:10px;border:1px solid var(--border2)}
 
@@ -286,6 +320,7 @@ export default function TheHammer(){
 
         @media(min-width:640px){
           :root{--px:20px}
+          .hm-ticker{display:block}
           .hm-tagline{display:inline}
           .hm-topbar-date-short{display:none}
           .hm-topbar-date-full{display:inline}
@@ -344,10 +379,10 @@ export default function TheHammer(){
         {/* Nav */}
         <nav className="hm-nav"><div className="hm-nav-inner">
           <div className="hm-tabs">
-            {cats.map(c=>{
+            {catsWithCounts.map(({cat:c,count})=>{
               const active=filter===c;
               return<button key={c}onClick={()=>setFilter(c)}className={`hm-tab${active?" hm-tab--active":""}`}>
-                {c==="all"?`All ${articles.length>0?`(${articles.length})`:""}`:`${c}`}
+                {c==="all"?`All${count>0?` (${count})`:""}`:`${c} (${count})`}
               </button>
             })}
           </div>
@@ -397,7 +432,7 @@ export default function TheHammer(){
               {articles.length>0&&<div className="hm-panel">
                 <div className="hm-stat-num">{articles.length}</div>
                 <div className="hm-stat-label">stories · {feeds.length} sources</div>
-                {updated&&<div className="hm-stat-time">{updated.toLocaleTimeString("en-CA",{hour:"2-digit",minute:"2-digit"})}</div>}
+                {updatedAgo&&<div className="hm-stat-time">Updated {updatedAgo}</div>}
               </div>}
             </div>
 
