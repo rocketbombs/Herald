@@ -95,6 +95,63 @@ function Card({a,big,i}){
   );
 }
 
+// ── Donate Modal ────────────────────────────────────────────────────────────
+const BTC_ADDRESS = "3NNuaniGXL2s3dES8RkEMSUrQKrJuNLaA6";
+
+function DonateModal({ onClose }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(BTC_ADDRESS).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      // Fallback for older browsers
+      const ta = document.createElement("textarea");
+      ta.value = BTC_ADDRESS;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="hm-modal-overlay" onClick={onClose}>
+      <div className="hm-modal" onClick={e => e.stopPropagation()}>
+        <button className="hm-modal-close" onClick={onClose} aria-label="Close">✕</button>
+        <div className="hm-modal-icon">☕</div>
+        <h2 className="hm-modal-title">Support THE HAMMER</h2>
+        <p className="hm-modal-desc">If you find this useful, consider sending a tip via Bitcoin.</p>
+
+        <div className="hm-modal-qr">
+          <img
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&bgcolor=12121a&color=e8e6e3&data=bitcoin:${BTC_ADDRESS}`}
+            alt="Bitcoin QR Code"
+            width={180} height={180}
+            style={{ borderRadius: 8 }}
+          />
+        </div>
+
+        <div className="hm-modal-addr-wrap">
+          <div className="hm-modal-addr-label">BTC Address</div>
+          <div className="hm-modal-addr-row">
+            <code className="hm-modal-addr">{BTC_ADDRESS}</code>
+            <button className="hm-modal-copy" onClick={copy} aria-label="Copy address">
+              {copied ? "✓ Copied" : "Copy"}
+            </button>
+          </div>
+        </div>
+
+        <p className="hm-modal-footer-text">Scan the QR code or tap Copy to grab the address.</p>
+      </div>
+    </div>
+  );
+}
+
 function Skel({n=3}){return Array.from({length:n}).map((_,i)=>(
   <div key={i}className="hm-skel"style={{animationDelay:`${i*.15}s`}}>
     <div className="hm-skel-bar"style={{width:"25%"}}/><div className="hm-skel-bar"style={{width:"80%"}}/><div className="hm-skel-bar"style={{width:"50%"}}/>
@@ -110,6 +167,7 @@ export default function TheHammer(){
   const[updated,setUpdated]=useState(null);
   const[phase,setPhase]=useState("loading");
   const[showSrc,setShowSrc]=useState(false);
+  const[showDonate,setShowDonate]=useState(false);
   // Accumulator ref to prevent duplicate appending
   const accRef=useRef({articles:[],feeds:[]});
 
@@ -311,9 +369,35 @@ export default function TheHammer(){
         .hm-empty-link{color:var(--accent);cursor:pointer;text-decoration:underline}
 
         /* ── Footer ── */
-        .hm-footer{border-top:1px solid var(--border2);padding:20px var(--px);margin-top:24px;text-align:center}
-        .hm-footer-brand{font-family:var(--head);font-size:14px;font-weight:700;color:var(--tx3);margin-bottom:4px}
-        .hm-footer-text{font-size:10px;color:var(--tx3);max-width:400px;margin:0 auto;line-height:1.5;opacity:.6}
+        .hm-footer{border-top:1px solid var(--border2);padding:20px var(--px);margin-top:24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
+        .hm-footer-brand{font-family:var(--head);font-size:14px;font-weight:700;color:var(--tx3)}
+        .hm-footer-text{font-size:10px;color:var(--tx3);max-width:400px;line-height:1.5;opacity:.6}
+        .hm-footer-donate{background:none;border:1px solid var(--border);color:var(--tx3);font-family:var(--body);font-size:11px;padding:6px 14px;border-radius:6px;cursor:pointer;transition:all .2s;-webkit-tap-highlight-color:transparent}
+        .hm-footer-donate:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+
+        /* ── Donate button in nav ── */
+        .hm-btn--donate{border-color:var(--border);color:var(--tx2)}
+        .hm-btn--donate:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+
+        /* ── Modal ── */
+        .hm-modal-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:20px;animation:hm-fadeIn .2s ease}
+        .hm-modal{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px 24px;max-width:380px;width:100%;position:relative;text-align:center;animation:hm-fadeIn .3s ease}
+        .hm-modal-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--tx3);font-size:16px;cursor:pointer;padding:4px 8px;border-radius:4px;transition:all .15s;-webkit-tap-highlight-color:transparent}
+        .hm-modal-close:hover{color:var(--tx);background:var(--bg4)}
+        .hm-modal-close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+        .hm-modal-icon{font-size:36px;margin-bottom:8px}
+        .hm-modal-title{font-family:var(--head);font-size:18px;font-weight:700;color:var(--tx);margin-bottom:6px}
+        .hm-modal-desc{font-size:13px;color:var(--tx2);line-height:1.5;margin-bottom:18px}
+        .hm-modal-qr{display:flex;justify-content:center;margin-bottom:18px}
+        .hm-modal-qr img{border:1px solid var(--border);border-radius:10px;background:var(--bg3)}
+        .hm-modal-addr-wrap{margin-bottom:16px}
+        .hm-modal-addr-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--tx3);font-weight:600;margin-bottom:6px;font-family:var(--head)}
+        .hm-modal-addr-row{display:flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+        .hm-modal-addr{flex:1;font-size:11px;color:var(--tx);word-break:break-all;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;line-height:1.4;text-align:left}
+        .hm-modal-copy{flex-shrink:0;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);font-family:var(--head);font-size:11px;font-weight:600;padding:5px 12px;border-radius:6px;cursor:pointer;transition:all .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+        .hm-modal-copy:hover{background:var(--accent);color:var(--bg)}
+        .hm-modal-copy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+        .hm-modal-footer-text{font-size:11px;color:var(--tx3);opacity:.7}
 
         .hm-topbar-date-short{display:inline}
         .hm-topbar-date-full{display:none}
@@ -387,6 +471,7 @@ export default function TheHammer(){
             })}
           </div>
           <div className="hm-nav-actions">
+            <button onClick={()=>setShowDonate(true)}className="hm-btn hm-btn--donate">☕ Tip</button>
             <button onClick={()=>setShowSrc(!showSrc)}className="hm-btn"style={showSrc?{background:"var(--bg4)"}:{}}>
               {feeds.length>0?`${feeds.length} src`:"src"}
             </button>
@@ -455,7 +540,10 @@ export default function TheHammer(){
         <footer className="hm-footer">
           <div className="hm-footer-brand">THE HAMMER<span style={{color:"var(--accent)"}}>.</span></div>
           <div className="hm-footer-text">Hamilton, Ontario</div>
+          <button onClick={()=>setShowDonate(true)}className="hm-footer-donate">☕ Support this project</button>
         </footer>
+
+        {showDonate && <DonateModal onClose={() => setShowDonate(false)} />}
       </div>
     </>
   );
