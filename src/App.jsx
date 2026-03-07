@@ -287,7 +287,129 @@ function DonateModal({ onClose }) {
   );
 }
 
-// ── Hamilton X Feed ──────────────────────────────────────────────────────────
+// ── Hamilton X Feed — Embedded X List Timeline ──────────────────────────────
+// List: Hamilton Ontario News (public)
+// Source: https://x.com/i/lists/729320138546270208
+const X_LIST_URL = "https://x.com/i/lists/729320138546270208";
+const HAMILTON_ACCOUNTS = [
+  { handle: "CBCHamilton", label: "CBC Hamilton", cat: "Media" },
+  { handle: "CHCHNews", label: "CHCH News", cat: "Media" },
+  { handle: "TheSpec", label: "The Spec", cat: "Media" },
+  { handle: "BayObserver", label: "Bay Observer", cat: "Media" },
+  { handle: "cityofhamilton", label: "City of Hamilton", cat: "Official" },
+  { handle: "HamiltonPolice", label: "Hamilton Police", cat: "Emergency" },
+  { handle: "HamiltonFireDep", label: "Hamilton Fire", cat: "Emergency" },
+  { handle: "HPS_Paramedics", label: "Paramedics", cat: "Emergency" },
+  { handle: "HamiltonLRT", label: "Hamilton LRT", cat: "Transit" },
+  { handle: "hsrHSRNow", label: "HSR Transit", cat: "Transit" },
+];
+
+function HamiltonX() {
+  const embedRef = useRef(null);
+  const [status, setStatus] = useState("loading"); // loading | ok | failed
+  const [expanded, setExpanded] = useState(false);
+  const scriptLoaded = useRef(false);
+
+  useEffect(() => {
+    if (!expanded || scriptLoaded.current) return;
+    scriptLoaded.current = true;
+
+    const failTimer = setTimeout(() => {
+      if (status === "loading") setStatus("failed");
+    }, 10000);
+
+    // Load widgets.js — it auto-finds <a class="twitter-timeline"> tags
+    const script = document.createElement("script");
+    script.src = "https://platform.twitter.com/widgets.js";
+    script.async = true;
+    script.charset = "utf-8";
+    script.onload = () => {
+      clearTimeout(failTimer);
+      // widgets.js scans for .twitter-timeline on load,
+      // but we may need to nudge it for dynamically inserted elements
+      if (window.twttr && window.twttr.widgets) {
+        window.twttr.widgets.load(embedRef.current).then(() => {
+          setStatus("ok");
+        }).catch(() => setStatus("failed"));
+      } else {
+        setStatus("failed");
+      }
+    };
+    script.onerror = () => { clearTimeout(failTimer); setStatus("failed"); };
+    document.head.appendChild(script);
+
+    return () => clearTimeout(failTimer);
+  }, [expanded, status]);
+
+  // Re-trigger widget load if expanded after script already loaded
+  useEffect(() => {
+    if (expanded && scriptLoaded.current && window.twttr?.widgets && status === "loading") {
+      window.twttr.widgets.load(embedRef.current).then(() => setStatus("ok")).catch(() => setStatus("failed"));
+    }
+  }, [expanded, status]);
+
+  return (
+    <div className="hx-panel">
+      <button className="hx-toggle" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Hide Hamilton X feed" : "Show Hamilton X feed"}>
+        <span className="hx-toggle-label">Hamilton on 𝕏</span>
+        <span className="hx-toggle-arrow">{expanded ? "▴" : "▾"}</span>
+      </button>
+
+      {expanded && (
+        <div className="hx-content">
+          {/* Declarative embed — widgets.js auto-converts this <a> into an iframe */}
+          {status !== "failed" && (
+            <div className="hx-embed-wrap" ref={embedRef}>
+              <a
+                className="twitter-timeline"
+                data-height="400"
+                data-theme="dark"
+                data-chrome="nofooter transparent noheader noborders"
+                data-dnt="true"
+                href={X_LIST_URL}
+              >
+                Loading Hamilton feed…
+              </a>
+              {status === "loading" && (
+                <div className="hx-loading"><div className="hm-spin" style={{ width: 14, height: 14 }} /></div>
+              )}
+            </div>
+          )}
+
+          {/* Fallback if embed fails */}
+          {status === "failed" && (
+            <div className="hx-fallback">
+              <div className="hx-fallback-msg">Live feed unavailable</div>
+              <div className="hx-fallback-desc">Follow Hamilton directly on X</div>
+            </div>
+          )}
+
+          {/* Always visible: curated account quick-links */}
+          <div className="hx-accounts">
+            {["Media", "Emergency", "Official", "Transit"].map(cat => (
+              <div key={cat} className="hx-cat-group">
+                <div className="hx-cat-label">{cat}</div>
+                <div className="hx-cat-links">
+                  {HAMILTON_ACCOUNTS.filter(a => a.cat === cat).map(a => (
+                    <a key={a.handle} href={`https://x.com/${a.handle}`} target="_blank" rel="noopener noreferrer" className="hx-account-link" aria-label={`${a.label} on X`}>
+                      @{a.handle}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Skel({n=3}){return Array.from({length:n}).map((_,i)=>(
+  <div key={i}className="hm-skel"style={{animationDelay:`${i*.15}s`}}>
+    <div className="hm-skel-bar"style={{width:"25%"}}/><div className="hm-skel-bar"style={{width:"80%"}}/><div className="hm-skel-bar"style={{width:"50%"}}/>
+  </div>
+))}
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
@@ -556,25 +678,25 @@ export default function TheHammer(){
 
         /* ── Hamilton X Widget ── */
         .hx-panel{background:var(--bg2);border:1px solid var(--border2);border-radius:10px;overflow:hidden}
-        .hx-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;background:none;border:none;padding:10px 14px;cursor:pointer;color:var(--tx);font-family:var(--head);font-size:12px;font-weight:600;transition:background .15s;-webkit-tap-highlight-color:transparent}
+        .hx-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;background:none;border:none;padding:10px 14px;cursor:pointer;color:var(--tx);font-family:var(--head);font-size:12px;font-weight:600;-webkit-tap-highlight-color:transparent;transition:background .15s}
         .hx-toggle:hover{background:var(--bg3)}
         .hx-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
         .hx-toggle-label{display:flex;align-items:center;gap:6px}
         .hx-toggle-arrow{color:var(--tx3);font-size:11px}
-        .hx-body{border-top:1px solid var(--border2);animation:hm-fadeIn .3s ease}
-        .hx-embed{position:relative;min-height:120px;overflow:hidden}
-        .hx-embed iframe{border:none!important;display:block;width:100%!important}
-        .hx-embed a.twitter-timeline{display:none}
-        .hx-loader{display:flex;align-items:center;justify-content:center;padding:30px 0}
+        .hx-content{border-top:1px solid var(--border2);animation:hm-fadeIn .3s ease}
+        .hx-embed-wrap{position:relative;min-height:120px;overflow:hidden}
+        .hx-embed-wrap iframe{border:none!important;display:block}
+        .hx-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg2);z-index:1;pointer-events:none}
         .hx-fallback{padding:16px;text-align:center}
-        .hx-fallback-title{font-size:12px;font-weight:600;color:var(--tx2);font-family:var(--head);margin-bottom:3px}
-        .hx-fallback-sub{font-size:11px;color:var(--tx3)}
-        .hx-links{padding:10px 14px 12px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border2)}
-        .hx-link-group{display:flex;align-items:center;flex-wrap:wrap;gap:4px}
-        .hx-link-cat{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--tx3);font-weight:600;font-family:var(--head);margin-right:4px;flex-shrink:0}
-        .hx-link{font-size:10px;color:var(--accent);text-decoration:none;padding:2px 7px;background:var(--accent-dim);border-radius:4px;transition:all .15s;white-space:nowrap}
-        .hx-link:hover{background:var(--accent);color:var(--bg)}
-        .hx-link:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+        .hx-fallback-msg{font-size:13px;font-weight:600;color:var(--tx2);font-family:var(--head);margin-bottom:4px}
+        .hx-fallback-desc{font-size:11px;color:var(--tx3)}
+        .hx-accounts{padding:10px 14px 12px;display:flex;flex-direction:column;gap:8px}
+        .hx-cat-group{}
+        .hx-cat-label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--tx3);font-weight:600;font-family:var(--head);margin-bottom:3px}
+        .hx-cat-links{display:flex;flex-wrap:wrap;gap:4px}
+        .hx-account-link{font-size:10px;color:var(--accent);text-decoration:none;padding:2px 7px;background:var(--accent-dim);border-radius:4px;transition:all .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+        .hx-account-link:hover{background:var(--accent);color:var(--bg)}
+        .hx-account-link:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
         /* ── Footer ── */
         .hm-footer{border-top:1px solid var(--border2);padding:20px var(--px);margin-top:24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
@@ -660,8 +782,8 @@ export default function TheHammer(){
             <span style={{opacity:.3}}>·</span>
             <div className="hm-header-status">
               {phase==="loading"&&<><div className="hm-spin"style={{width:10,height:10}}/><span style={{color:"var(--accent)"}}>Loading</span></>}
-              {phase==="wave2"&&<><div className="hm-spin"style={{width:10,height:10,borderTopColor:"#fbbf24"}}/><span style={{color:"#fbbf24"}}>Loading more</span></>}
-              {phase==="done"&&<span style={{color:"var(--accent)"}}>Live</span>}
+              {phase==="wave2"&&<><div className="hm-spin"style={{width:10,height:10,borderTopColor:"#fbbf24"}}/><span style={{color:"#fbbf24"}}>More feeds</span></>}
+              {phase==="done"&&<span style={{color:"var(--accent)"}}>{feeds.length} sources · {articles.length}</span>}
             </div>
           </div>
         </div></header>
@@ -677,13 +799,15 @@ export default function TheHammer(){
             {catsWithCounts.map(({cat:c,count})=>{
               const active=filter===c;
               return<button key={c}onClick={()=>setFilter(c)}className={`hm-tab${active?" hm-tab--active":""}`}>
-                {c==="all"?"All":c}
+                {c==="all"?`All${count>0?` (${count})`:""}`:`${c} (${count})`}
               </button>
             })}
           </div>
           <div className="hm-nav-actions">
             <button onClick={()=>setShowDonate(true)}className="hm-btn hm-btn--donate">☕ Tip</button>
-            <button onClick={()=>setShowSrc(!showSrc)}className="hm-btn"style={showSrc?{background:"var(--bg4)"}:{}}>src</button>
+            <button onClick={()=>setShowSrc(!showSrc)}className="hm-btn"style={showSrc?{background:"var(--bg4)"}:{}}>
+              {feeds.length>0?`${feeds.length} src`:"src"}
+            </button>
             <button onClick={load}disabled={phase==="loading"}className="hm-btn hm-btn--accent">↻</button>
           </div>
         </div></nav>
@@ -723,8 +847,10 @@ export default function TheHammer(){
                   <div className="hm-spin"style={{width:8,height:8,borderTopColor:"#fbbf24"}}/>more incoming
                 </div>}
               </div>
-              {updatedAgo&&<div className="hm-panel" style={{textAlign:"center"}}>
-                <div className="hm-stat-time">Updated {updatedAgo}</div>
+              {articles.length>0&&<div className="hm-panel">
+                <div className="hm-stat-num">{articles.length}</div>
+                <div className="hm-stat-label">stories · {feeds.length} sources</div>
+                {updatedAgo&&<div className="hm-stat-time">Updated {updatedAgo}</div>}
               </div>}
               <HamiltonX/>
             </div>
