@@ -66,14 +66,24 @@ function parseItems(xml) {
 
 function strip(h) {
   if (!h) return "";
-  // First pass: decode HTML entities (handles Reddit's double-encoding)
-  let s = h.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ");
-  // Second pass: same again for double-encoded (&amp;lt; → &lt; → <)
-  s = s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  let s = h;
+  // Decode numeric HTML entities: &#32; → space, &#x200B; → zero-width-space, etc.
+  s = s.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+  s = s.replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)));
+  // Decode named HTML entities (two passes for Reddit's double-encoding: &amp;lt; → &lt; → <)
+  for (let i = 0; i < 2; i++) {
+    s = s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+         .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+         .replace(/&apos;/g, "'").replace(/&mdash;/g, "—").replace(/&ndash;/g, "–")
+         .replace(/&hellip;/g, "…").replace(/&rsquo;/g, "'").replace(/&lsquo;/g, "'")
+         .replace(/&rdquo;/g, "\u201D").replace(/&ldquo;/g, "\u201C");
+  }
   // Strip all HTML tags
   s = s.replace(/<[^>]+>/g, " ");
-  // Strip Reddit noise: [link], [comments], submitted by /u/...
-  s = s.replace(/\[link\]/gi, "").replace(/\[comments\]/gi, "").replace(/submitted by\s*\/u\/\S+/gi, "").replace(/&#x200B;/g, "");
+  // Strip Reddit noise
+  s = s.replace(/\[link\]/gi, "").replace(/\[comments\]/gi, "")
+       .replace(/submitted by\s*\/u\/\S+/gi, "")
+       .replace(/\u200B/g, ""); // zero-width space (now decoded from &#x200B;)
   // Clean whitespace
   return s.replace(/\s+/g, " ").trim();
 }

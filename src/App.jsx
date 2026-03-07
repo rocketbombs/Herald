@@ -288,7 +288,6 @@ function DonateModal({ onClose }) {
 }
 
 // ── Hamilton X Feed ──────────────────────────────────────────────────────────
-const X_LIST_ID = "729320138546270208";
 const X_ACCOUNTS = [
   { handle: "CBCHamilton", cat: "Media" },{ handle: "CHCHNews", cat: "Media" },
   { handle: "TheSpec", cat: "Media" },{ handle: "BayObserver", cat: "Media" },
@@ -297,79 +296,66 @@ const X_ACCOUNTS = [
   { handle: "HamiltonLRT", cat: "Transit" },{ handle: "hsrHSRNow", cat: "Transit" },
 ];
 
-function loadTwitterScript() {
-  return new Promise((resolve, reject) => {
-    if (window.twttr?.widgets) { resolve(window.twttr); return; }
-    const existing = document.querySelector('script[src*="platform.twitter.com/widgets.js"]');
-    if (existing) {
-      // Script tag exists but hasn't loaded yet — poll for it
-      const poll = setInterval(() => {
-        if (window.twttr?.widgets) { clearInterval(poll); resolve(window.twttr); }
-      }, 200);
-      setTimeout(() => { clearInterval(poll); reject(new Error("timeout")); }, 10000);
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = "https://platform.twitter.com/widgets.js";
-    s.async = true;
-    s.onload = () => {
-      const poll = setInterval(() => {
-        if (window.twttr?.widgets) { clearInterval(poll); resolve(window.twttr); }
-      }, 100);
-      setTimeout(() => { clearInterval(poll); reject(new Error("timeout")); }, 8000);
-    };
-    s.onerror = () => reject(new Error("script failed"));
-    document.head.appendChild(s);
-  });
-}
-
 function HamiltonX() {
   const [expanded, setExpanded] = useState(false);
-  const [status, setStatus] = useState("idle"); // idle | loading | ok | failed
-  const containerRef = useRef(null);
-  const iframeRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const embedRef = useRef(null);
+  const attempted = useRef(false);
 
   useEffect(() => {
-    if (!expanded) return;
-    if (status === "ok" || status === "loading") return;
+    if (!expanded || attempted.current) return;
+    attempted.current = true;
 
-    let cancelled = false;
-    setStatus("loading");
+    const container = embedRef.current;
+    if (!container) return;
 
-    (async () => {
-      try {
-        const twttr = await loadTwitterScript();
-        if (cancelled || !containerRef.current) return;
-        // Clear any previous content
-        containerRef.current.innerHTML = "";
-        // createTimeline returns the iframe element on success
-        const el = await twttr.widgets.createTimeline(
-          { sourceType: "list", id: X_LIST_ID },
-          containerRef.current,
-          { height: 420, theme: "dark", chrome: "nofooter noheader noborders transparent", dnt: true }
-        );
-        if (cancelled) return;
-        if (el) {
-          iframeRef.current = el;
-          setStatus("ok");
-        } else {
-          setStatus("failed");
-        }
-      } catch {
-        if (!cancelled) setStatus("failed");
+    // Timeout: if no iframe appears within 12s, show fallback
+    const failTimer = setTimeout(() => { setFailed(true); }, 12000);
+
+    // 1. Inject the raw HTML anchor that widgets.js expects
+    container.innerHTML = '<a class="twitter-timeline" data-height="420" data-theme="dark" data-chrome="nofooter noheader noborders transparent" data-dnt="true" href="https://twitter.com/i/lists/729320138546270208">Hamilton News</a>';
+
+    // 2. Load widgets.js (or re-trigger if already loaded)
+    const onReady = () => {
+      if (window.twttr && window.twttr.widgets) {
+        window.twttr.widgets.load(container).then(() => {
+          clearTimeout(failTimer);
+          // Check if an iframe was actually inserted
+          setTimeout(() => {
+            if (container.querySelector("iframe")) {
+              setLoaded(true);
+            } else {
+              setFailed(true);
+            }
+          }, 2000);
+        });
       }
-    })();
+    };
 
-    return () => { cancelled = true; };
-  }, [expanded, status]);
-
-  // Cleanup on collapse
-  useEffect(() => {
-    if (!expanded && iframeRef.current) {
-      iframeRef.current = null;
-      if (containerRef.current) containerRef.current.innerHTML = "";
-      setStatus("idle");
+    if (window.twttr && window.twttr.widgets) {
+      onReady();
+    } else {
+      // Check if script tag already exists
+      if (!document.querySelector('script[src*="platform.twitter.com/widgets.js"]')) {
+        const s = document.createElement("script");
+        s.src = "https://platform.twitter.com/widgets.js";
+        s.async = true;
+        s.charset = "utf-8";
+        document.head.appendChild(s);
+      }
+      // Poll for twttr global
+      const poll = setInterval(() => {
+        if (window.twttr && window.twttr.widgets) {
+          clearInterval(poll);
+          onReady();
+        }
+      }, 300);
+      // Stop polling after 10s
+      setTimeout(() => clearInterval(poll), 10000);
     }
+
+    return () => clearTimeout(failTimer);
   }, [expanded]);
 
   return (
@@ -380,14 +366,12 @@ function HamiltonX() {
       </button>
       {expanded && (
         <div className="hx-body">
-          {status !== "failed" && (
-            <div className="hx-embed" ref={containerRef}>
-              {status === "loading" && (
-                <div className="hx-loader"><div className="hm-spin" style={{ width: 14, height: 14 }} /></div>
-              )}
+          {!failed && (
+            <div className="hx-embed" ref={embedRef}>
+              {!loaded && <div className="hx-loader"><div className="hm-spin" style={{ width: 14, height: 14 }} /></div>}
             </div>
           )}
-          {status === "failed" && (
+          {failed && (
             <div className="hx-fallback">
               <div className="hx-fallback-title">Feed unavailable</div>
               <div className="hx-fallback-sub">Follow Hamilton sources directly</div>
@@ -690,6 +674,7 @@ export default function TheHammer(){
         .hx-body{border-top:1px solid var(--border2);animation:hm-fadeIn .3s ease}
         .hx-embed{position:relative;min-height:120px;overflow:hidden}
         .hx-embed iframe{border:none!important;display:block;width:100%!important}
+        .hx-embed a.twitter-timeline{display:none}
         .hx-loader{display:flex;align-items:center;justify-content:center;padding:30px 0}
         .hx-fallback{padding:16px;text-align:center}
         .hx-fallback-title{font-size:12px;font-weight:600;color:var(--tx2);font-family:var(--head);margin-bottom:3px}
@@ -785,8 +770,8 @@ export default function TheHammer(){
             <span style={{opacity:.3}}>·</span>
             <div className="hm-header-status">
               {phase==="loading"&&<><div className="hm-spin"style={{width:10,height:10}}/><span style={{color:"var(--accent)"}}>Loading</span></>}
-              {phase==="wave2"&&<><div className="hm-spin"style={{width:10,height:10,borderTopColor:"#fbbf24"}}/><span style={{color:"#fbbf24"}}>More feeds</span></>}
-              {phase==="done"&&<span style={{color:"var(--accent)"}}>{feeds.length} sources · {articles.length}</span>}
+              {phase==="wave2"&&<><div className="hm-spin"style={{width:10,height:10,borderTopColor:"#fbbf24"}}/><span style={{color:"#fbbf24"}}>Loading more</span></>}
+              {phase==="done"&&<span style={{color:"var(--accent)"}}>Live</span>}
             </div>
           </div>
         </div></header>
@@ -802,15 +787,13 @@ export default function TheHammer(){
             {catsWithCounts.map(({cat:c,count})=>{
               const active=filter===c;
               return<button key={c}onClick={()=>setFilter(c)}className={`hm-tab${active?" hm-tab--active":""}`}>
-                {c==="all"?`All${count>0?` (${count})`:""}`:`${c} (${count})`}
+                {c==="all"?"All":c}
               </button>
             })}
           </div>
           <div className="hm-nav-actions">
             <button onClick={()=>setShowDonate(true)}className="hm-btn hm-btn--donate">☕ Tip</button>
-            <button onClick={()=>setShowSrc(!showSrc)}className="hm-btn"style={showSrc?{background:"var(--bg4)"}:{}}>
-              {feeds.length>0?`${feeds.length} src`:"src"}
-            </button>
+            <button onClick={()=>setShowSrc(!showSrc)}className="hm-btn"style={showSrc?{background:"var(--bg4)"}:{}}>src</button>
             <button onClick={load}disabled={phase==="loading"}className="hm-btn hm-btn--accent">↻</button>
           </div>
         </div></nav>
@@ -850,10 +833,8 @@ export default function TheHammer(){
                   <div className="hm-spin"style={{width:8,height:8,borderTopColor:"#fbbf24"}}/>more incoming
                 </div>}
               </div>
-              {articles.length>0&&<div className="hm-panel">
-                <div className="hm-stat-num">{articles.length}</div>
-                <div className="hm-stat-label">stories · {feeds.length} sources</div>
-                {updatedAgo&&<div className="hm-stat-time">Updated {updatedAgo}</div>}
+              {updatedAgo&&<div className="hm-panel" style={{textAlign:"center"}}>
+                <div className="hm-stat-time">Updated {updatedAgo}</div>
               </div>}
               <HamiltonX/>
             </div>
