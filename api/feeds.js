@@ -66,7 +66,16 @@ function parseItems(xml) {
 
 function strip(h) {
   if (!h) return "";
-  return h.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
+  // First pass: decode HTML entities (handles Reddit's double-encoding)
+  let s = h.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ");
+  // Second pass: same again for double-encoded (&amp;lt; → &lt; → <)
+  s = s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  // Strip all HTML tags
+  s = s.replace(/<[^>]+>/g, " ");
+  // Strip Reddit noise: [link], [comments], submitted by /u/...
+  s = s.replace(/\[link\]/gi, "").replace(/\[comments\]/gi, "").replace(/submitted by\s*\/u\/\S+/gi, "").replace(/&#x200B;/g, "");
+  // Clean whitespace
+  return s.replace(/\s+/g, " ").trim();
 }
 
 async function fetchFeed(feed, ms) {

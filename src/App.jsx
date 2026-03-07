@@ -13,32 +13,167 @@ const FEED_META = {
 function timeAgo(d){if(!d)return"";try{const m=Math.floor((Date.now()-new Date(d).getTime())/6e4);if(isNaN(m)||m<0)return"";if(m<1)return"now";if(m<60)return`${m}m`;const h=Math.floor(m/60);if(h<24)return`${h}h`;const dy=Math.floor(h/24);if(dy<7)return`${dy}d`;return new Date(d).toLocaleDateString("en-CA",{month:"short",day:"numeric"})}catch{return""}}
 function dedup(a){const s=new Set();return a.filter(x=>{const k=`${x.feedId}-${(x.title||"").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,50)}`;if(!k||s.has(k))return false;s.add(k);return true})}
 
-// ── Weather ─────────────────────────────────────────────────────────────────
-const WMO={0:"☀️ Clear",1:"🌤 Clear",2:"⛅ Cloudy",3:"☁️ Overcast",45:"🌫 Fog",51:"🌦 Drizzle",61:"🌧 Rain",63:"🌧 Rain",65:"🌧 Heavy Rain",66:"🌧 Freezing Rain",71:"🌨 Snow",73:"🌨 Snow",75:"❄️ Heavy Snow",80:"🌦 Showers",82:"⛈ Storms",95:"⛈ Thunder"};
+// ── Hamilton Now — City Conditions Dashboard ────────────────────────────────
+const WMO={0:"☀️",1:"🌤",2:"⛅",3:"☁️",45:"🌫",48:"🌫",51:"🌦",53:"🌦",55:"🌧",56:"🌧",61:"🌧",63:"🌧",65:"🌧",66:"🌧",71:"🌨",73:"🌨",75:"❄️",77:"❄️",80:"🌦",81:"🌧",82:"⛈",85:"🌨",95:"⛈",96:"⛈"};
+const WMO_LABEL={0:"Clear",1:"Clear",2:"Partly Cloudy",3:"Overcast",45:"Fog",48:"Fog",51:"Drizzle",53:"Drizzle",55:"Heavy Drizzle",56:"Freezing Drizzle",61:"Light Rain",63:"Rain",65:"Heavy Rain",66:"Freezing Rain",71:"Light Snow",73:"Snow",75:"Heavy Snow",77:"Snow Grains",80:"Showers",81:"Showers",82:"Heavy Showers",85:"Snow Showers",95:"Thunderstorm",96:"Thunderstorm"};
+const UV_LEVELS=[{max:2,label:"Low",color:"#66BB6A"},{max:5,label:"Moderate",color:"#FFB300"},{max:7,label:"High",color:"#FF7043"},{max:10,label:"Very High",color:"#E53935"},{max:99,label:"Extreme",color:"#AB47BC"}];
+const AQI_LEVELS=[{max:20,label:"Excellent",color:"#66BB6A"},{max:40,label:"Good",color:"#9CCC65"},{max:60,label:"Moderate",color:"#FFB300"},{max:80,label:"Poor",color:"#FF7043"},{max:100,label:"Very Poor",color:"#E53935"},{max:999,label:"Hazardous",color:"#AB47BC"}];
 
-function Weather(){
-  const[w,setW]=useState(null);
-  useEffect(()=>{
-    fetch("https://api.open-meteo.com/v1/forecast?latitude=43.2557&longitude=-79.8711&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m&daily=temperature_2m_max,temperature_2m_min&timezone=America%2FToronto&forecast_days=1")
-      .then(r=>r.json()).then(d=>{
-        if(!d?.current)return;const c=d.current,dy=d.daily;
-        const dirs=["N","NE","E","SE","S","SW","W","NW"];
-        const dir=dirs[Math.round((c.wind_direction_10m||0)/45)%8];
-        const wmo=WMO[c.weather_code]||"🌤 --";
-        setW({temp:Math.round(c.temperature_2m),cond:wmo.slice(2).trim(),icon:wmo.slice(0,2).trim(),hum:c.relative_humidity_2m,wind:`${Math.round(c.wind_speed_10m)} km/h ${dir}`,hi:Math.round(dy.temperature_2m_max[0]),lo:Math.round(dy.temperature_2m_min[0])});
-      }).catch(()=>{});
-  },[]);
-  if(!w)return<div className="hm-weather"><div className="hm-spin"style={{width:16,height:16}}/></div>;
-  return(
-    <div className="hm-weather">
-      <div className="hm-weather-top">
-        <span className="hm-weather-temp">{w.temp}°</span>
-        <span className="hm-weather-icon">{w.icon}</span>
+function getLevel(val, levels) { return levels.find(l => val <= l.max) || levels[levels.length - 1]; }
+
+function HamiltonNow() {
+  const [data, setData] = useState(null);
+  const [aqi, setAqi] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    // Main weather: current + hourly (next 12h) + daily (sunrise/sunset/uv)
+    fetch("https://api.open-meteo.com/v1/forecast?latitude=43.2557&longitude=-79.8711&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m&hourly=temperature_2m,weather_code,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max&timezone=America%2FToronto&forecast_days=2")
+      .then(r => r.json()).then(d => {
+        if (!d?.current) return;
+        const c = d.current, dy = d.daily, hr = d.hourly;
+        const dirs = ["N","NE","E","SE","S","SW","W","NW"];
+        const dir = dirs[Math.round((c.wind_direction_10m || 0) / 45) % 8];
+        const nowHour = new Date().getHours();
+
+        // Build next 10 hours from hourly data
+        const nowIdx = hr.time.findIndex(t => new Date(t).getHours() === nowHour && new Date(t).getDate() === new Date().getDate());
+        const startIdx = nowIdx >= 0 ? nowIdx : 0;
+        const hourly = [];
+        for (let i = startIdx; i < Math.min(startIdx + 10, hr.time.length); i++) {
+          const h = new Date(hr.time[i]).getHours();
+          hourly.push({
+            hour: h === nowHour ? "Now" : `${h % 12 || 12}${h < 12 ? "a" : "p"}`,
+            temp: Math.round(hr.temperature_2m[i]),
+            icon: WMO[hr.weather_code[i]] || "🌤",
+            precip: hr.precipitation_probability[i] || 0,
+          });
+        }
+
+        const sunriseTime = dy.sunrise?.[0] ? new Date(dy.sunrise[0]).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" }) : "--";
+        const sunsetTime = dy.sunset?.[0] ? new Date(dy.sunset[0]).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" }) : "--";
+
+        setData({
+          temp: Math.round(c.temperature_2m),
+          feels: Math.round(c.apparent_temperature),
+          icon: WMO[c.weather_code] || "🌤",
+          cond: WMO_LABEL[c.weather_code] || "Unknown",
+          hum: c.relative_humidity_2m,
+          wind: `${Math.round(c.wind_speed_10m)} ${dir}`,
+          gusts: Math.round(c.wind_gusts_10m),
+          hi: Math.round(dy.temperature_2m_max[0]),
+          lo: Math.round(dy.temperature_2m_min[0]),
+          uv: Math.round(dy.uv_index_max[0]),
+          sunrise: sunriseTime,
+          sunset: sunsetTime,
+          precipMax: dy.precipitation_probability_max?.[0] || 0,
+          hourly,
+        });
+      }).catch(() => {});
+
+    // Air quality — separate Open-Meteo endpoint (also free, no key)
+    fetch("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=43.2557&longitude=-79.8711&current=european_aqi,pm2_5,pm10&timezone=America%2FToronto")
+      .then(r => r.json()).then(d => {
+        if (!d?.current) return;
+        setAqi({ index: d.current.european_aqi, pm25: d.current.pm2_5, pm10: d.current.pm10 });
+      }).catch(() => {});
+  }, []);
+
+  if (!data) return <div className="hn-dash" style={{padding:20,display:"flex",justifyContent:"center",alignItems:"center",minHeight:70}}><div className="hm-spin" style={{ width: 16, height: 16 }} /></div>;
+
+  const uvLevel = getLevel(data.uv, UV_LEVELS);
+  const aqiLevel = aqi ? getLevel(aqi.index, AQI_LEVELS) : null;
+
+  return (
+    <div className="hn-dash">
+      {/* Header row */}
+      <div className="hn-header">
+        <div className="hn-temp-block">
+          <span className="hn-temp">{data.temp}°</span>
+          <span className="hn-icon">{data.icon}</span>
+        </div>
+        <div className="hn-cond-block">
+          <div className="hn-cond">{data.cond}</div>
+          <div className="hn-feels">Feels {data.feels}° · ↑{data.hi}° ↓{data.lo}°</div>
+        </div>
       </div>
-      <div className="hm-weather-cond">{w.cond}</div>
-      <div className="hm-weather-row">
-        <span>💧{w.hum}%</span><span>💨{w.wind}</span><span>↑{w.hi}° ↓{w.lo}°</span>
+
+      {/* Compact stats row — always visible */}
+      <div className="hn-stats">
+        <div className="hn-stat">
+          <div className="hn-stat-val">💧{data.hum}%</div>
+          <div className="hn-stat-lbl">Humidity</div>
+        </div>
+        <div className="hn-stat">
+          <div className="hn-stat-val">💨{data.wind}</div>
+          <div className="hn-stat-lbl">Wind</div>
+        </div>
+        <div className="hn-stat">
+          <div className="hn-stat-val" style={{ color: uvLevel.color }}>{data.uv}</div>
+          <div className="hn-stat-lbl">UV {uvLevel.label}</div>
+        </div>
+        {aqi && (
+          <div className="hn-stat">
+            <div className="hn-stat-val" style={{ color: aqiLevel.color }}>{aqi.index}</div>
+            <div className="hn-stat-lbl">AQI {aqiLevel.label}</div>
+          </div>
+        )}
       </div>
+
+      {/* Expand toggle */}
+      <button className="hn-expand" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Collapse forecast" : "Expand forecast"}>
+        {expanded ? "Hide forecast ▴" : "Hourly forecast ▾"}
+      </button>
+
+      {/* Expanded section */}
+      {expanded && (
+        <div className="hn-expanded">
+          {/* Hourly forecast */}
+          <div className="hn-hourly-scroll">
+            {data.hourly.map((h, i) => (
+              <div key={i} className="hn-hour">
+                <div className="hn-hour-time">{h.hour}</div>
+                <div className="hn-hour-icon">{h.icon}</div>
+                <div className="hn-hour-temp">{h.temp}°</div>
+                {h.precip > 0 && <div className="hn-hour-precip">💧{h.precip}%</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* Precipitation bar */}
+          {data.precipMax > 0 && (
+            <div className="hn-precip-row">
+              <span className="hn-precip-label">Precip. chance today</span>
+              <div className="hn-precip-bar-bg">
+                <div className="hn-precip-bar-fill" style={{ width: `${data.precipMax}%` }} />
+              </div>
+              <span className="hn-precip-pct">{data.precipMax}%</span>
+            </div>
+          )}
+
+          {/* Sun + AQI details */}
+          <div className="hn-detail-grid">
+            <div className="hn-detail">
+              <div className="hn-detail-icon">🌅</div>
+              <div><div className="hn-detail-val">{data.sunrise}</div><div className="hn-detail-lbl">Sunrise</div></div>
+            </div>
+            <div className="hn-detail">
+              <div className="hn-detail-icon">🌇</div>
+              <div><div className="hn-detail-val">{data.sunset}</div><div className="hn-detail-lbl">Sunset</div></div>
+            </div>
+            <div className="hn-detail">
+              <div className="hn-detail-icon">💨</div>
+              <div><div className="hn-detail-val">{data.gusts} km/h</div><div className="hn-detail-lbl">Gusts</div></div>
+            </div>
+            {aqi && (
+              <div className="hn-detail">
+                <div className="hn-detail-icon">🫁</div>
+                <div><div className="hn-detail-val">PM2.5: {aqi.pm25}</div><div className="hn-detail-lbl">PM10: {aqi.pm10}</div></div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -152,6 +287,135 @@ function DonateModal({ onClose }) {
   );
 }
 
+// ── Hamilton X Feed — Curated Twitter/X Embed + Fallback ────────────────────
+/*
+ * CURATED HAMILTON X ACCOUNTS — Segmented for List Creation
+ *
+ * === Official City/Gov ===
+ * @cityofhamilton    — City of Hamilton (official)
+ * @HamiltonLRT       — Hamilton LRT Project
+ * @Hamilton_CA        — Hamilton Conservation Authority
+ * @hamiltonecdev     — Hamilton Economic Development
+ *
+ * === Transit / Traffic / Emergency ===
+ * @HamiltonPolice    — Hamilton Police Service
+ * @HamiltonFireDep   — Hamilton Fire Department
+ * @HPS_Paramedics    — Hamilton Paramedic Services
+ * @hsrHSRNow         — HSR Real-Time Transit
+ *
+ * === Local Media / Journalists ===
+ * @CBCHamilton       — CBC Hamilton (digital news)
+ * @CHCHNews          — CHCH TV (Hamilton-based TV station)
+ * @TheSpec           — The Hamilton Spectator
+ * @BayObserver       — Bay Observer (independent)
+ *
+ * TO CREATE AN X LIST:
+ * 1. Go to x.com → Lists → Create New List → "Hamilton News"
+ * 2. Add the accounts above
+ * 3. Get the list URL (e.g. https://x.com/i/lists/123456789)
+ * 4. Replace EMBED_URL below with your list URL
+ * 5. The widget will embed that list's timeline
+ */
+const EMBED_URL = "https://x.com/CBCHamilton"; // Replace with your X List URL
+const HAMILTON_ACCOUNTS = [
+  { handle: "CBCHamilton", label: "CBC Hamilton", cat: "Media" },
+  { handle: "CHCHNews", label: "CHCH News", cat: "Media" },
+  { handle: "TheSpec", label: "The Spec", cat: "Media" },
+  { handle: "BayObserver", label: "Bay Observer", cat: "Media" },
+  { handle: "cityofhamilton", label: "City of Hamilton", cat: "Official" },
+  { handle: "HamiltonPolice", label: "Hamilton Police", cat: "Emergency" },
+  { handle: "HamiltonFireDep", label: "Hamilton Fire", cat: "Emergency" },
+  { handle: "HPS_Paramedics", label: "Paramedics", cat: "Emergency" },
+  { handle: "HamiltonLRT", label: "Hamilton LRT", cat: "Transit" },
+  { handle: "hsrHSRNow", label: "HSR Transit", cat: "Transit" },
+];
+
+function HamiltonX() {
+  const containerRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    // Load Twitter widget.js asynchronously
+    const timeout = setTimeout(() => { if (!loaded) setFailed(true); }, 8000);
+
+    if (window.twttr && window.twttr.widgets) {
+      renderWidget();
+      return () => clearTimeout(timeout);
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://platform.twitter.com/widgets.js";
+    script.async = true;
+    script.onload = () => renderWidget();
+    script.onerror = () => setFailed(true);
+    document.head.appendChild(script);
+
+    function renderWidget() {
+      if (!containerRef.current || loaded) return;
+      clearTimeout(timeout);
+      window.twttr.widgets.createTimeline(
+        { sourceType: "url", url: EMBED_URL },
+        containerRef.current,
+        {
+          height: 380,
+          theme: "dark",
+          chrome: "nofooter transparent noheader noborders",
+          dnt: true,
+        }
+      ).then(() => setLoaded(true)).catch(() => setFailed(true));
+    }
+
+    return () => clearTimeout(timeout);
+  }, [loaded]);
+
+  return (
+    <div className="hx-panel">
+      <button className="hx-toggle" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "Hide Hamilton X feed" : "Show Hamilton X feed"}>
+        <span className="hx-toggle-label">Hamilton on 𝕏</span>
+        <span className="hx-toggle-arrow">{expanded ? "▴" : "▾"}</span>
+      </button>
+
+      {expanded && (
+        <div className="hx-content">
+          {/* Embed container — hidden if failed */}
+          {!failed && (
+            <div className="hx-embed-wrap">
+              <div ref={containerRef} className="hx-embed" />
+              {!loaded && <div className="hx-loading"><div className="hm-spin" style={{ width: 14, height: 14 }} /></div>}
+            </div>
+          )}
+
+          {/* Fallback — shown if embed fails */}
+          {failed && (
+            <div className="hx-fallback">
+              <div className="hx-fallback-msg">Live feed unavailable</div>
+              <div className="hx-fallback-desc">Follow Hamilton directly on X</div>
+            </div>
+          )}
+
+          {/* Always show curated account links */}
+          <div className="hx-accounts">
+            {["Media", "Emergency", "Official", "Transit"].map(cat => (
+              <div key={cat} className="hx-cat-group">
+                <div className="hx-cat-label">{cat}</div>
+                <div className="hx-cat-links">
+                  {HAMILTON_ACCOUNTS.filter(a => a.cat === cat).map(a => (
+                    <a key={a.handle} href={`https://x.com/${a.handle}`} target="_blank" rel="noopener noreferrer" className="hx-account-link" aria-label={`${a.label} on X`}>
+                      @{a.handle}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Skel({n=3}){return Array.from({length:n}).map((_,i)=>(
   <div key={i}className="hm-skel"style={{animationDelay:`${i*.15}s`}}>
     <div className="hm-skel-bar"style={{width:"25%"}}/><div className="hm-skel-bar"style={{width:"80%"}}/><div className="hm-skel-bar"style={{width:"50%"}}/>
@@ -231,7 +495,26 @@ export default function TheHammer(){
     if (filter !== "all" && !catsWithCounts.find(x => x.cat === filter)) setFilter("all");
   }, [catsWithCounts, filter]);
   const fil=filter==="all"?articles:articles.filter(a=>a.category===filter);
-  const feat=fil.slice(0,3),rest=fil.slice(3);
+  // Hero selection: prioritize Hamilton-local feeds for featured stories
+  const HAMILTON_FEED_IDS = new Set(["cbc-ham", "global-ham", "bayobserver", "spec"]);
+  const heroPool = filter === "all"
+    ? (() => {
+        const local = fil.filter(a => HAMILTON_FEED_IDS.has(a.feedId));
+        const heroes = local.slice(0, 3);
+        // Fill remaining hero slots from any source if not enough local
+        if (heroes.length < 3) {
+          const used = new Set(heroes.map(h => `${h.feedId}-${h.title}`));
+          for (const a of fil) {
+            if (heroes.length >= 3) break;
+            if (!used.has(`${a.feedId}-${a.title}`)) heroes.push(a);
+          }
+        }
+        return heroes;
+      })()
+    : fil.slice(0, 3);
+  const feat = heroPool;
+  const featKeys = new Set(feat.map(a => `${a.feedId}-${a.title}`));
+  const rest = fil.filter(a => !featKeys.has(`${a.feedId}-${a.title}`));
   const ticker=articles.slice(0,25);
 
   return(
@@ -298,13 +581,49 @@ export default function TheHammer(){
         .hm-divider-text{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--tx3);font-weight:600;white-space:nowrap;font-family:var(--head)}
         .hm-article-grid{display:grid;grid-template-columns:1fr;gap:8px}
 
-        /* ── Weather ── */
-        .hm-weather{padding:14px 16px;background:linear-gradient(135deg,var(--bg3),var(--bg4));border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;gap:4px;min-height:70px;justify-content:center;align-items:center}
-        .hm-weather-top{display:flex;align-items:baseline;gap:6px;width:100%}
-        .hm-weather-temp{font-size:32px;font-weight:700;font-family:var(--head);line-height:1;color:var(--tx)}
-        .hm-weather-icon{font-size:20px}
-        .hm-weather-cond{font-size:12px;color:var(--tx2);width:100%}
-        .hm-weather-row{display:flex;gap:10px;font-size:11px;color:var(--tx3);width:100%;margin-top:2px}
+        /* ── Hamilton Now Dashboard ── */
+        .hn-dash{background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+        .hn-header{display:flex;align-items:center;gap:12px;padding:14px 16px 0}
+        .hn-temp-block{display:flex;align-items:baseline;gap:4px}
+        .hn-temp{font-size:34px;font-weight:700;font-family:var(--head);line-height:1;color:var(--tx)}
+        .hn-icon{font-size:22px}
+        .hn-cond-block{flex:1}
+        .hn-cond{font-size:13px;font-weight:600;color:var(--tx);font-family:var(--head)}
+        .hn-feels{font-size:11px;color:var(--tx3);margin-top:1px}
+
+        .hn-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;padding:10px 16px;background:transparent}
+        .hn-stat{padding:5px 0}
+        .hn-stat-val{font-size:12px;font-weight:600;color:var(--tx);font-family:var(--head)}
+        .hn-stat-lbl{font-size:9px;color:var(--tx3);text-transform:uppercase;letter-spacing:.5px;margin-top:1px}
+
+        .hn-expand{display:block;width:100%;background:none;border:none;border-top:1px solid var(--border2);padding:7px 16px;font-size:11px;color:var(--tx3);cursor:pointer;font-family:var(--body);transition:all .15s;text-align:center;-webkit-tap-highlight-color:transparent}
+        .hn-expand:hover{color:var(--accent);background:var(--accent-dim)}
+        .hn-expand:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+        .hn-expanded{border-top:1px solid var(--border2);padding:12px 0;animation:hm-fadeIn .3s ease}
+
+        .hn-hourly-scroll{display:flex;gap:2px;overflow-x:auto;padding:0 12px 8px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+        .hn-hourly-scroll::-webkit-scrollbar{height:2px}
+        .hn-hourly-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px}
+        .hn-hour{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 8px;border-radius:8px;min-width:48px;background:var(--bg3);transition:background .15s}
+        .hn-hour:first-child{background:var(--accent-dim);border:1px solid rgba(229,168,37,.2)}
+        .hn-hour-time{font-size:9px;color:var(--tx3);font-weight:600;text-transform:uppercase;letter-spacing:.3px;font-family:var(--head)}
+        .hn-hour:first-child .hn-hour-time{color:var(--accent)}
+        .hn-hour-icon{font-size:16px;line-height:1}
+        .hn-hour-temp{font-size:12px;font-weight:600;color:var(--tx);font-family:var(--head)}
+        .hn-hour-precip{font-size:8px;color:var(--accent2);font-weight:500}
+
+        .hn-precip-row{display:flex;align-items:center;gap:8px;padding:6px 16px 10px;font-size:10px}
+        .hn-precip-label{color:var(--tx3);flex-shrink:0;font-size:10px}
+        .hn-precip-bar-bg{flex:1;height:4px;background:var(--bg4);border-radius:2px;overflow:hidden}
+        .hn-precip-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .5s ease}
+        .hn-precip-pct{color:var(--accent);font-weight:600;font-family:var(--head);font-size:11px;flex-shrink:0}
+
+        .hn-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;padding:0 12px 8px}
+        .hn-detail{display:flex;align-items:center;gap:8px;padding:6px 4px}
+        .hn-detail-icon{font-size:16px;flex-shrink:0}
+        .hn-detail-val{font-size:11px;font-weight:600;color:var(--tx);font-family:var(--head)}
+        .hn-detail-lbl{font-size:9px;color:var(--tx3)}
 
         /* ── Cards ── */
         .hm-card{display:block;text-decoration:none;color:inherit;padding:12px 14px;background:var(--bg2);border:1px solid var(--border2);border-radius:10px;transition:all .2s ease;animation:hm-fadeIn .4s ease both;cursor:pointer;-webkit-tap-highlight-color:transparent;border-left:3px solid var(--accent)}
@@ -368,6 +687,28 @@ export default function TheHammer(){
         .hm-empty{grid-column:1/-1;text-align:center;padding:36px 16px;color:var(--tx3)}
         .hm-empty-link{color:var(--accent);cursor:pointer;text-decoration:underline}
 
+        /* ── Hamilton X Widget ── */
+        .hx-panel{background:var(--bg2);border:1px solid var(--border2);border-radius:10px;overflow:hidden}
+        .hx-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;background:none;border:none;padding:10px 14px;cursor:pointer;color:var(--tx);font-family:var(--head);font-size:12px;font-weight:600;-webkit-tap-highlight-color:transparent;transition:background .15s}
+        .hx-toggle:hover{background:var(--bg3)}
+        .hx-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+        .hx-toggle-label{display:flex;align-items:center;gap:6px}
+        .hx-toggle-arrow{color:var(--tx3);font-size:11px}
+        .hx-content{border-top:1px solid var(--border2);animation:hm-fadeIn .3s ease}
+        .hx-embed-wrap{position:relative;min-height:100px}
+        .hx-embed{overflow:hidden}
+        .hx-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg2)}
+        .hx-fallback{padding:16px;text-align:center}
+        .hx-fallback-msg{font-size:13px;font-weight:600;color:var(--tx2);font-family:var(--head);margin-bottom:4px}
+        .hx-fallback-desc{font-size:11px;color:var(--tx3)}
+        .hx-accounts{padding:10px 14px 12px;display:flex;flex-direction:column;gap:8px}
+        .hx-cat-group{}
+        .hx-cat-label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--tx3);font-weight:600;font-family:var(--head);margin-bottom:3px}
+        .hx-cat-links{display:flex;flex-wrap:wrap;gap:4px}
+        .hx-account-link{font-size:10px;color:var(--accent);text-decoration:none;padding:2px 7px;background:var(--accent-dim);border-radius:4px;transition:all .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+        .hx-account-link:hover{background:var(--accent);color:var(--bg)}
+        .hx-account-link:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
         /* ── Footer ── */
         .hm-footer{border-top:1px solid var(--border2);padding:20px var(--px);margin-top:24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
         .hm-footer-brand{font-family:var(--head);font-size:14px;font-weight:700;color:var(--tx3)}
@@ -415,7 +756,8 @@ export default function TheHammer(){
           .hm-card--feat .hm-card-title{font-size:18px}
           .hm-card-title{font-size:15px}
           .hm-card:hover{transform:translateY(-2px)}
-          .hm-weather-temp{font-size:36px}
+          .hn-temp{font-size:38px}
+          .hn-stats{grid-template-columns:repeat(4,1fr)}
           .hm-card-hero-img{width:170px;height:105px}
           .hm-card-thumb{width:85px;height:60px}
         }
@@ -432,6 +774,8 @@ export default function TheHammer(){
           .hm-card--feat .hm-card-title{font-size:20px}
           .hm-card-hero-img{width:200px;height:120px}
           .hm-logo{font-size:28px}
+          .hn-stats{grid-template-columns:repeat(2,1fr)}
+          .hn-temp{font-size:32px}
         }
         @media(min-width:1200px){.hm-sidebar{width:270px}}
       `}</style>
@@ -498,7 +842,7 @@ export default function TheHammer(){
           <div className="hm-grid">
             {/* Sidebar */}
             <div className="hm-sidebar">
-              <Weather/>
+              <HamiltonNow/>
               <div className="hm-panel">
                 <div className="hm-panel-label">{phase==="loading"?"Connecting":phase==="wave2"?`${feeds.length} feeds +`:`${feeds.length} Feeds`}</div>
                 {phase==="loading"?<div style={{display:"flex",flexDirection:"column",gap:5}}>
@@ -519,6 +863,7 @@ export default function TheHammer(){
                 <div className="hm-stat-label">stories · {feeds.length} sources</div>
                 {updatedAgo&&<div className="hm-stat-time">Updated {updatedAgo}</div>}
               </div>}
+              <HamiltonX/>
             </div>
 
             {/* Articles */}
