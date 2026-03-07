@@ -287,36 +287,10 @@ function DonateModal({ onClose }) {
   );
 }
 
-// ── Hamilton X Feed — Curated Twitter/X Embed + Fallback ────────────────────
-/*
- * CURATED HAMILTON X ACCOUNTS — Segmented for List Creation
- *
- * === Official City/Gov ===
- * @cityofhamilton    — City of Hamilton (official)
- * @HamiltonLRT       — Hamilton LRT Project
- * @Hamilton_CA        — Hamilton Conservation Authority
- * @hamiltonecdev     — Hamilton Economic Development
- *
- * === Transit / Traffic / Emergency ===
- * @HamiltonPolice    — Hamilton Police Service
- * @HamiltonFireDep   — Hamilton Fire Department
- * @HPS_Paramedics    — Hamilton Paramedic Services
- * @hsrHSRNow         — HSR Real-Time Transit
- *
- * === Local Media / Journalists ===
- * @CBCHamilton       — CBC Hamilton (digital news)
- * @CHCHNews          — CHCH TV (Hamilton-based TV station)
- * @TheSpec           — The Hamilton Spectator
- * @BayObserver       — Bay Observer (independent)
- *
- * TO CREATE AN X LIST:
- * 1. Go to x.com → Lists → Create New List → "Hamilton News"
- * 2. Add the accounts above
- * 3. Get the list URL (e.g. https://x.com/i/lists/123456789)
- * 4. Replace EMBED_URL below with your list URL
- * 5. The widget will embed that list's timeline
- */
-const EMBED_URL = "https://x.com/CBCHamilton"; // Replace with your X List URL
+// ── Hamilton X Feed — Embedded X List Timeline ──────────────────────────────
+// List: Hamilton Ontario News (public)
+// Source: https://x.com/i/lists/729320138546270208
+const X_LIST_URL = "https://x.com/i/lists/729320138546270208";
 const HAMILTON_ACCOUNTS = [
   { handle: "CBCHamilton", label: "CBC Hamilton", cat: "Media" },
   { handle: "CHCHNews", label: "CHCH News", cat: "Media" },
@@ -331,44 +305,48 @@ const HAMILTON_ACCOUNTS = [
 ];
 
 function HamiltonX() {
-  const containerRef = useRef(null);
-  const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const embedRef = useRef(null);
+  const [status, setStatus] = useState("loading"); // loading | ok | failed
   const [expanded, setExpanded] = useState(false);
+  const scriptLoaded = useRef(false);
 
   useEffect(() => {
-    // Load Twitter widget.js asynchronously
-    const timeout = setTimeout(() => { if (!loaded) setFailed(true); }, 8000);
+    if (!expanded || scriptLoaded.current) return;
+    scriptLoaded.current = true;
 
-    if (window.twttr && window.twttr.widgets) {
-      renderWidget();
-      return () => clearTimeout(timeout);
-    }
+    const failTimer = setTimeout(() => {
+      if (status === "loading") setStatus("failed");
+    }, 10000);
 
+    // Load widgets.js — it auto-finds <a class="twitter-timeline"> tags
     const script = document.createElement("script");
     script.src = "https://platform.twitter.com/widgets.js";
     script.async = true;
-    script.onload = () => renderWidget();
-    script.onerror = () => setFailed(true);
+    script.charset = "utf-8";
+    script.onload = () => {
+      clearTimeout(failTimer);
+      // widgets.js scans for .twitter-timeline on load,
+      // but we may need to nudge it for dynamically inserted elements
+      if (window.twttr && window.twttr.widgets) {
+        window.twttr.widgets.load(embedRef.current).then(() => {
+          setStatus("ok");
+        }).catch(() => setStatus("failed"));
+      } else {
+        setStatus("failed");
+      }
+    };
+    script.onerror = () => { clearTimeout(failTimer); setStatus("failed"); };
     document.head.appendChild(script);
 
-    function renderWidget() {
-      if (!containerRef.current || loaded) return;
-      clearTimeout(timeout);
-      window.twttr.widgets.createTimeline(
-        { sourceType: "url", url: EMBED_URL },
-        containerRef.current,
-        {
-          height: 380,
-          theme: "dark",
-          chrome: "nofooter transparent noheader noborders",
-          dnt: true,
-        }
-      ).then(() => setLoaded(true)).catch(() => setFailed(true));
-    }
+    return () => clearTimeout(failTimer);
+  }, [expanded, status]);
 
-    return () => clearTimeout(timeout);
-  }, [loaded]);
+  // Re-trigger widget load if expanded after script already loaded
+  useEffect(() => {
+    if (expanded && scriptLoaded.current && window.twttr?.widgets && status === "loading") {
+      window.twttr.widgets.load(embedRef.current).then(() => setStatus("ok")).catch(() => setStatus("failed"));
+    }
+  }, [expanded, status]);
 
   return (
     <div className="hx-panel">
@@ -379,23 +357,34 @@ function HamiltonX() {
 
       {expanded && (
         <div className="hx-content">
-          {/* Embed container — hidden if failed */}
-          {!failed && (
-            <div className="hx-embed-wrap">
-              <div ref={containerRef} className="hx-embed" />
-              {!loaded && <div className="hx-loading"><div className="hm-spin" style={{ width: 14, height: 14 }} /></div>}
+          {/* Declarative embed — widgets.js auto-converts this <a> into an iframe */}
+          {status !== "failed" && (
+            <div className="hx-embed-wrap" ref={embedRef}>
+              <a
+                className="twitter-timeline"
+                data-height="400"
+                data-theme="dark"
+                data-chrome="nofooter transparent noheader noborders"
+                data-dnt="true"
+                href={X_LIST_URL}
+              >
+                Loading Hamilton feed…
+              </a>
+              {status === "loading" && (
+                <div className="hx-loading"><div className="hm-spin" style={{ width: 14, height: 14 }} /></div>
+              )}
             </div>
           )}
 
-          {/* Fallback — shown if embed fails */}
-          {failed && (
+          {/* Fallback if embed fails */}
+          {status === "failed" && (
             <div className="hx-fallback">
               <div className="hx-fallback-msg">Live feed unavailable</div>
               <div className="hx-fallback-desc">Follow Hamilton directly on X</div>
             </div>
           )}
 
-          {/* Always show curated account links */}
+          {/* Always visible: curated account quick-links */}
           <div className="hx-accounts">
             {["Media", "Emergency", "Official", "Transit"].map(cat => (
               <div key={cat} className="hx-cat-group">
@@ -695,9 +684,9 @@ export default function TheHammer(){
         .hx-toggle-label{display:flex;align-items:center;gap:6px}
         .hx-toggle-arrow{color:var(--tx3);font-size:11px}
         .hx-content{border-top:1px solid var(--border2);animation:hm-fadeIn .3s ease}
-        .hx-embed-wrap{position:relative;min-height:100px}
-        .hx-embed{overflow:hidden}
-        .hx-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg2)}
+        .hx-embed-wrap{position:relative;min-height:120px;overflow:hidden}
+        .hx-embed-wrap iframe{border:none!important;display:block}
+        .hx-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg2);z-index:1;pointer-events:none}
         .hx-fallback{padding:16px;text-align:center}
         .hx-fallback-msg{font-size:13px;font-weight:600;color:var(--tx2);font-family:var(--head);margin-bottom:4px}
         .hx-fallback-desc{font-size:11px;color:var(--tx3)}
